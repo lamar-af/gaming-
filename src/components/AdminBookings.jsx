@@ -11,7 +11,7 @@ import { formatDate, formatTimeRange } from '../lib/format.js'
 import { friendlyAuthError } from '../lib/authErrors.js'
 import { DEFAULT_GAME_COLOR, GAME_COLORS } from '../config.js'
 
-const NO_FILTERS = { date: '', gameId: '', status: '' }
+const NO_FILTERS = { gameId: '', status: '' }
 
 function statusLabel(booking) {
   if (booking.status === 'cancelled') {
@@ -20,9 +20,10 @@ function statusLabel(booking) {
   return 'Confirmed'
 }
 
-export default function AdminBookings({ games }) {
+// `date` is shared with the slot list on the Admin page ("" = all days).
+export default function AdminBookings({ games, date, onDateChange }) {
   const [result, setResult] = useState({ loaded: false, bookings: [], error: null })
-  const [filters, setFilters] = useState({ ...NO_FILTERS, status: 'confirmed' })
+  const [filters, setFilters] = useState({ gameId: '', status: 'confirmed' })
   const [busyId, setBusyId] = useState(null)
   const [message, setMessage] = useState(null) // { type, text }
 
@@ -35,6 +36,11 @@ export default function AdminBookings({ games }) {
 
   function setFilter(name, value) {
     setFilters((f) => ({ ...f, [name]: value }))
+  }
+
+  function clearFilters() {
+    setFilters(NO_FILTERS)
+    onDateChange('')
   }
 
   async function handleCancel(booking) {
@@ -55,7 +61,7 @@ export default function AdminBookings({ games }) {
     }
   }
 
-  const visible = filterBookings(result.bookings, filters)
+  const visible = filterBookings(result.bookings, { ...filters, date })
   const stats = bookingStats(result.bookings)
 
   let content
@@ -73,7 +79,7 @@ export default function AdminBookings({ games }) {
         <p className="muted" style={{ margin: '6px 0 16px' }}>
           Try another day or clear the filters.
         </p>
-        <button type="button" className="btn btn-ghost" onClick={() => setFilters(NO_FILTERS)}>
+        <button type="button" className="btn btn-ghost" onClick={clearFilters}>
           Clear filters
         </button>
       </StateMessage>
@@ -140,11 +146,7 @@ export default function AdminBookings({ games }) {
       <div className="card filters">
         <label className="field">
           <span>Day</span>
-          <input
-            type="date"
-            value={filters.date}
-            onChange={(e) => setFilter('date', e.target.value)}
-          />
+          <input type="date" value={date} onChange={(e) => onDateChange(e.target.value)} />
         </label>
         <label className="field">
           <span>Game</span>
@@ -169,7 +171,7 @@ export default function AdminBookings({ games }) {
 
       <p className="small muted" aria-live="polite">
         Showing {visible.length} of {result.bookings.length} booking(s) ·{' '}
-        <button type="button" className="link-button" onClick={() => setFilters(NO_FILTERS)}>
+        <button type="button" className="link-button" onClick={clearFilters}>
           Clear filters
         </button>
       </p>

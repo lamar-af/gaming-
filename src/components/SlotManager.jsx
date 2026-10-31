@@ -1,13 +1,13 @@
-// Admin: see every slot for a game/date and block or unblock open ones.
+// Admin: see every slot for a game on the page's selected day, and block or unblock open ones.
 import { useEffect, useState } from 'react'
 import StateMessage from './StateMessage.jsx'
-import { setSlotBlocked, subscribeToSlots, todayAtVenue } from '../lib/scheduling.js'
-import { formatTimeRange } from '../lib/format.js'
+import { setSlotBlocked, subscribeToSlots, venueDateTime } from '../lib/scheduling.js'
+import { formatDate, formatTimeRange } from '../lib/format.js'
 import { friendlyAuthError } from '../lib/authErrors.js'
 
-export default function SlotManager({ games }) {
+// `date` comes from the Admin page (the same Day as the bookings filter).
+export default function SlotManager({ games, date }) {
   const [gameId, setGameId] = useState(games[0]?.id ?? '')
-  const [date, setDate] = useState(todayAtVenue())
   const [busyId, setBusyId] = useState(null)
   const [error, setError] = useState('')
 
@@ -41,7 +41,11 @@ export default function SlotManager({ games }) {
 
   let content
   if (!gameId || !date) {
-    content = <StateMessage type="empty">Pick a game and date.</StateMessage>
+    content = (
+      <StateMessage type="empty" title="Pick a day">
+        Choose a Day in the filters above to see its slots.
+      </StateMessage>
+    )
   } else if (loading) {
     content = <StateMessage type="loading" title="Loading slots…" />
   } else if (result.error) {
@@ -84,7 +88,9 @@ export default function SlotManager({ games }) {
   return (
     <section className="card stack">
       <h2>Slot availability</h2>
-      <p className="muted small">Blocked slots can't be booked by customers.</p>
+      <p className="muted small">
+        Blocked slots can't be booked by customers. Uses the Day picked in the filters above.
+      </p>
 
       <div className="row">
         <label className="field">
@@ -97,10 +103,10 @@ export default function SlotManager({ games }) {
             ))}
           </select>
         </label>
-        <label className="field">
-          <span>Date</span>
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-        </label>
+        <p className="field">
+          <span>Day</span>
+          <span className="muted">{date ? formatDate(venueDateTime(date, 12)) : 'All days'}</span>
+        </p>
       </div>
 
       {error && <StateMessage type="error">{error}</StateMessage>}

@@ -154,6 +154,8 @@ function GenerateSlotsSection() {
 export default function AdminPage() {
   // Games are needed by the bookings filter and the slot manager.
   const [games, setGames] = useState(null)
+  // ONE date for the whole page: the bookings "Day" filter and the slot list both use it.
+  const [date, setDate] = useState(todayAtVenue())
 
   useEffect(() => {
     getGames()
@@ -171,9 +173,9 @@ export default function AdminPage() {
         <StateMessage type="loading" title="Loading…" />
       ) : (
         <>
-          <AdminBookings games={games} />
+          <AdminBookings games={games} date={date} onDateChange={setDate} />
           <h2 className="section-label">Venue tools</h2>
-          {games.length > 0 && <SlotManager games={games} />}
+          {games.length > 0 && <SlotManager games={games} date={date} />}
         </>
       )}
       <GamesSection />
