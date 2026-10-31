@@ -248,6 +248,27 @@ export async function setSlotBlocked(slotId, blocked) {
 // Fields that make a slot free again (used when cancelling or moving a booking).
 const OPEN_SLOT = { status: 'open', bookedBy: null, bookingId: null }
 
+// Per-customer time lock: a customer can hold only ONE confirmed booking per hour,
+// even across different games. The lock ID is the slot's date + hour with the user's ID:
+//   slot "the-maze_2026-11-05_15" -> lock "userSlots/{uid}_2026-11-05_15"
+// Every game at 15:00 that day maps to the same lock. firestore.rules builds it the same way.
+export function userSlotId(uid, slotId) {
+  const [, date, hour] = slotId.split('_')
+  return `${uid}_${date}_${hour}`
+}
+
+function userSlotRef(uid, slotId) {
+  return doc(db, 'userSlots', userSlotId(uid, slotId))
+}
+
+// Thrown when the customer already has a booking at that hour (any game).
+export class OverlapError extends Error {
+  constructor() {
+    super('You already have a booking at this time.')
+    this.name = 'OverlapError'
+  }
+}
+
 // Thrown when the chosen slot is no longer free (someone else got it first).
 export class SlotUnavailableError extends Error {
   constructor() {
@@ -338,26 +359,31 @@ export function validatePlayers(players, maxPlayers = MAX_PLAYERS) {
   return null
 }
 
-// Books a slot in ONE transaction, so two people can never book the same slot:
+// Books a slot in ONE transaction, so two people can never book the same slot
+// and one customer can never hold two bookings at the same hour:
 //   1. read the slot and check it is still open and in the future
-//   2. mark the slot as booked by this user
-//   3. create the booking
-// If two customers try at the same time, Firestore retries the slower one,
-// which then sees the slot is booked and fails with SlotUnavailableError.
+//   2. read the customer's lock for that hour and check it doesn't exist
+//   3. mark the slot as booked, create the booking, create the lock
+// If two requests race, Firestore retries the slower one, which then fails.
 export async function bookSlot({ slotId, players, user, profile }) {
   const playersError = validatePlayers(players)
   if (playersError) throw new Error(playersError)
 
   const slotRef = doc(db, 'slots', slotId)
   const bookingRef = doc(collection(db, 'bookings')) // new ID, created in the transaction
+  const lockRef = userSlotRef(user.uid, slotId)
 
   try {
     await runTransaction(db, async (tx) => {
       const slotSnap = await tx.get(slotRef)
+      const lockSnap = await tx.get(lockRef)
       if (!slotSnap.exists() || !isSlotAvailable(slotSnap.data())) {
         throw new SlotUnavailableError()
       }
+      if (lockSnap.exists()) throw new OverlapError()
       const slot = slotSnap.data()
+
+      tx.set(lockRef, { uid: user.uid, bookingId: bookingRef.id, createdAt: serverTimestamp() })
 
       // The slot stores which booking holds it, so the security rules can check both sides.
       tx.update(slotRef, { status: 'booked', bookedBy: user.uid, bookingId: bookingRef.id })
@@ -386,8 +412,17 @@ export async function bookSlot({ slotId, players, user, profile }) {
   return bookingRef.id
 }
 
+// Inside a transaction: delete the customer's time lock if it belongs to this booking.
+// (Bookings made before locks existed have none, and deleting a missing doc is denied.)
+async function readOwnLock(tx, booking, bookingId) {
+  const lockRef = userSlotRef(booking.userId, booking.slotId)
+  const lockSnap = await tx.get(lockRef)
+  const isOwn = lockSnap.exists() && lockSnap.data().bookingId === bookingId
+  return { lockRef, isOwn }
+}
+
 // Customer cancels their own booking in ONE transaction:
-// check owner + 6-hour rule -> mark booking cancelled -> reopen the slot.
+// check owner + 6-hour rule -> mark booking cancelled -> reopen the slot -> remove the lock.
 export async function cancelBooking(bookingId, userId) {
   const bookingRef = doc(db, 'bookings', bookingId)
 
@@ -398,6 +433,7 @@ export async function cancelBooking(bookingId, userId) {
 
     if (booking.userId !== userId) throw new Error('This is not your booking.')
     if (!canModifyBooking(booking)) throw new BookingLockedError()
+    const lock = await readOwnLock(tx, booking, bookingId)
 
     tx.update(bookingRef, {
       status: 'cancelled',
@@ -405,6 +441,7 @@ export async function cancelBooking(bookingId, userId) {
       updatedAt: serverTimestamp(),
     })
     tx.update(doc(db, 'slots', booking.slotId), OPEN_SLOT)
+    if (lock.isOwn) tx.delete(lock.lockRef)
   })
 }
 
@@ -422,10 +459,13 @@ export async function getBooking(bookingId) {
 
 // Customer edits their booking (game, date, time, and/or players) in ONE transaction:
 //   1. check owner + 6-hour rule on the CURRENT booking
-//   2. if the time changed: check the new slot is open, release the old slot,
+//   2. check the customer has no OTHER booking at the new hour (time lock)
+//   3. if the slot changed: check the new slot is open, release the old slot,
 //      book the new slot
-//   3. update the booking (updatedAt)
-// Changing only the players keeps the same slot.
+//   4. if the hour changed: delete the old lock, create the new one
+//      (same hour, different game: the lock stays)
+//   5. update the booking (updatedAt)
+// Changing only the players keeps the same slot and lock.
 export async function editBooking(bookingId, userId, { slotId, players }) {
   const playersError = validatePlayers(players)
   if (playersError) throw new Error(playersError)
@@ -444,22 +484,39 @@ export async function editBooking(bookingId, userId, { slotId, players }) {
       if (!canModifyBooking(booking)) throw new BookingLockedError()
 
       slotChanged = slotId !== booking.slotId
+      const newLockRef = userSlotRef(userId, slotId)
+      const hourChanged = newLockRef.id !== userSlotId(userId, booking.slotId)
 
-      // Only the players changed: same slot, just update the count.
+      const newLockSnap = await tx.get(newLockRef)
+      if (newLockSnap.exists() && newLockSnap.data().bookingId !== bookingId) {
+        throw new OverlapError()
+      }
+      const oldLock = hourChanged ? await readOwnLock(tx, booking, bookingId) : null
+
+      let newSlot = null
+      if (slotChanged) {
+        const newSlotSnap = await tx.get(doc(db, 'slots', slotId))
+        if (!newSlotSnap.exists() || !isSlotAvailable(newSlotSnap.data())) {
+          throw new SlotUnavailableError()
+        }
+        newSlot = newSlotSnap.data()
+      }
+
+      // Writes.
+      if (oldLock?.isOwn) tx.delete(oldLock.lockRef)
+      // Also creates a missing lock for bookings made before locks existed.
+      if (!newLockSnap.exists()) {
+        tx.set(newLockRef, { uid: userId, bookingId, createdAt: serverTimestamp() })
+      }
+
       if (!slotChanged) {
+        // Only the players changed: same slot, just update the count.
         tx.update(bookingRef, { players, updatedAt: serverTimestamp() })
         return
       }
 
-      const newSlotRef = doc(db, 'slots', slotId)
-      const newSlotSnap = await tx.get(newSlotRef)
-      if (!newSlotSnap.exists() || !isSlotAvailable(newSlotSnap.data())) {
-        throw new SlotUnavailableError()
-      }
-      const newSlot = newSlotSnap.data()
-
       tx.update(doc(db, 'slots', booking.slotId), OPEN_SLOT)
-      tx.update(newSlotRef, { status: 'booked', bookedBy: userId, bookingId })
+      tx.update(doc(db, 'slots', slotId), { status: 'booked', bookedBy: userId, bookingId })
       tx.update(bookingRef, {
         slotId,
         gameId: newSlot.gameId,
@@ -478,7 +535,7 @@ export async function editBooking(bookingId, userId, { slotId, players }) {
 }
 
 // Admin cancels any confirmed booking, at any time (no 6-hour rule),
-// in ONE transaction: mark booking cancelled -> reopen the slot.
+// in ONE transaction: mark booking cancelled -> reopen the slot -> remove the customer's lock.
 export async function adminCancelBooking(bookingId) {
   const bookingRef = doc(db, 'bookings', bookingId)
 
@@ -487,6 +544,7 @@ export async function adminCancelBooking(bookingId) {
     if (!bookingSnap.exists()) throw new Error('Booking not found.')
     const booking = bookingSnap.data()
     if (booking.status !== 'confirmed') throw new Error('This booking is already cancelled.')
+    const lock = await readOwnLock(tx, booking, bookingId)
 
     tx.update(bookingRef, {
       status: 'cancelled',
@@ -494,5 +552,6 @@ export async function adminCancelBooking(bookingId) {
       updatedAt: serverTimestamp(),
     })
     tx.update(doc(db, 'slots', booking.slotId), OPEN_SLOT)
+    if (lock.isOwn) tx.delete(lock.lockRef)
   })
 }

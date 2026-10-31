@@ -11,6 +11,8 @@ rules_version = '2';
 //             or moved. Admins can change slots.
 // - bookings: customers read/create/edit/cancel ONLY their own, and edits/cancels
 //             only until 6 hours before the session. Admins read all and can cancel any.
+// - userSlots: one lock per customer per hour ({uid}_{YYYY-MM-DD}_{HH}), so a customer
+//             can't hold two confirmed bookings at the same time, even for different games.
 // - Anything not allowed below is denied (including all deletes).
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -45,6 +47,21 @@ service cloud.firestore {
 
     function bookingAfter(bookingId) {
       return getAfter(/databases/$(database)/documents/bookings/$(bookingId)).data;
+    }
+
+    // Lock ID for a user at a slot's hour. Slot IDs are {gameId}_{YYYY-MM-DD}_{HH},
+    // so every game at the same hour gives the same lock ID. Same as userSlotId() in scheduling.js.
+    function lockIdFor(uid, slotId) {
+      return uid + '_' + slotId.split('_')[1] + '_' + slotId.split('_')[2];
+    }
+
+    function lockPath(uid, slotId) {
+      return /databases/$(database)/documents/userSlots/$(lockIdFor(uid, slotId));
+    }
+
+    // After this write, the user's lock for the booking's hour points to this booking.
+    function lockHeldByBooking(booking, bookingId) {
+      return getAfter(lockPath(request.auth.uid, booking.slotId)).data.bookingId == bookingId;
     }
 
     // After this write, the booking's slot is booked by this user, points back to
@@ -139,7 +156,8 @@ service cloud.firestore {
         && validPlayers(request.resource.data.players)
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedAt == request.time
-        && slotHeldByBooking(request.resource.data, bookingId);
+        && slotHeldByBooking(request.resource.data, bookingId)
+        && lockHeldByBooking(request.resource.data, bookingId);
 
       // Customer edits their own booking (game, time, players) before the 6-hour lock.
       allow update: if signedIn()
@@ -150,7 +168,8 @@ service cloud.firestore {
         && validPlayers(request.resource.data.players)
         && request.resource.data.updatedAt == request.time
         && onlyChanges(['slotId', 'gameId', 'gameName', 'start', 'end', 'players', 'updatedAt'])
-        && slotHeldByBooking(request.resource.data, bookingId);
+        && slotHeldByBooking(request.resource.data, bookingId)
+        && lockHeldByBooking(request.resource.data, bookingId);
 
       // Customer cancels their own booking before the 6-hour lock, and frees the slot.
       allow update: if signedIn()
@@ -161,7 +180,9 @@ service cloud.firestore {
         && request.resource.data.cancelledBy == 'customer'
         && request.resource.data.updatedAt == request.time
         && onlyChanges(['status', 'cancelledBy', 'updatedAt'])
-        && slotAfter(resource.data.slotId).bookingId != bookingId;
+        && slotAfter(resource.data.slotId).bookingId != bookingId
+        && (!existsAfter(lockPath(request.auth.uid, resource.data.slotId))
+            || getAfter(lockPath(request.auth.uid, resource.data.slotId)).data.bookingId != bookingId);
 
       // Admin cancels any booking at any time (no 6-hour rule).
       allow update: if isAdmin()
@@ -169,6 +190,32 @@ service cloud.firestore {
         && request.resource.data.status == 'cancelled'
         && request.resource.data.cancelledBy == 'admin'
         && onlyChanges(['status', 'cancelledBy', 'updatedAt']);
+    }
+
+    // ---------- userSlots (one booking per customer per hour) ----------
+
+    match /userSlots/{lockId} {
+      // Read your own locks (needed inside the booking transaction). Admins read all.
+      allow read: if signedIn() && (lockId.split('_')[0] == request.auth.uid || isAdmin());
+
+      // Create only your own lock, for your own confirmed booking at this exact hour.
+      // A lock that already exists can't be created again (that would be an update,
+      // which is never allowed), so a second booking at the same hour is rejected.
+      allow create: if signedIn()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.keys().hasOnly(['uid', 'bookingId', 'createdAt'])
+        && request.resource.data.createdAt == request.time
+        && bookingAfter(request.resource.data.bookingId).userId == request.auth.uid
+        && bookingAfter(request.resource.data.bookingId).status == 'confirmed'
+        && lockId == lockIdFor(request.auth.uid, bookingAfter(request.resource.data.bookingId).slotId);
+
+      // Delete your own lock only when its booking is cancelled or moved to another hour
+      // in the same write. Admins can delete any lock.
+      allow delete: if isAdmin()
+        || (signedIn()
+          && resource.data.uid == request.auth.uid
+          && (bookingAfter(resource.data.bookingId).status == 'cancelled'
+              || lockIdFor(request.auth.uid, bookingAfter(resource.data.bookingId).slotId) != lockId));
     }
   }
 }
