@@ -17,6 +17,7 @@ import { db } from '../firebase.js'
 import {
   DEFAULT_GAMES,
   EDIT_LOCK_HOURS,
+  EDIT_LOCK_LABEL,
   LAST_START_HOUR,
   MAX_PLAYERS,
   MIN_PLAYERS,
@@ -277,15 +278,15 @@ export class SlotUnavailableError extends Error {
   }
 }
 
-// Thrown when a customer tries to change a booking less than 6 hours before it starts.
+// Thrown when a customer tries to change a booking less than EDIT_LOCK_HOURS before it starts.
 export class BookingLockedError extends Error {
   constructor() {
-    super(`Changes close ${EDIT_LOCK_HOURS} hours before your session.`)
+    super(`Changes close ${EDIT_LOCK_LABEL} before your session.`)
     this.name = 'BookingLockedError'
   }
 }
 
-// The 6-hour rule: a customer can edit or cancel only a confirmed booking,
+// The edit lock rule (EDIT_LOCK_HOURS, now 1 hour): a customer can edit or cancel only a confirmed booking,
 // and only until EDIT_LOCK_HOURS before it starts.
 // The same rule is enforced in firestore.rules.
 export function canModifyBooking(booking, now = new Date()) {
@@ -422,7 +423,7 @@ async function readOwnLock(tx, booking, bookingId) {
 }
 
 // Customer cancels their own booking in ONE transaction:
-// check owner + 6-hour rule -> mark booking cancelled -> reopen the slot -> remove the lock.
+// check owner + edit lock rule -> mark booking cancelled -> reopen the slot -> remove the lock.
 export async function cancelBooking(bookingId, userId) {
   const bookingRef = doc(db, 'bookings', bookingId)
 
@@ -458,7 +459,7 @@ export async function getBooking(bookingId) {
 }
 
 // Customer edits their booking (game, date, time, and/or players) in ONE transaction:
-//   1. check owner + 6-hour rule on the CURRENT booking
+//   1. check owner + edit lock rule on the CURRENT booking
 //   2. check the customer has no OTHER booking at the new hour (time lock)
 //   3. if the slot changed: check the new slot is open, release the old slot,
 //      book the new slot
@@ -534,7 +535,7 @@ export async function editBooking(bookingId, userId, { slotId, players }) {
   }
 }
 
-// Admin cancels any confirmed booking, at any time (no 6-hour rule),
+// Admin cancels any confirmed booking, at any time (no edit lock),
 // in ONE transaction: mark booking cancelled -> reopen the slot -> remove the customer's lock.
 export async function adminCancelBooking(bookingId) {
   const bookingRef = doc(db, 'bookings', bookingId)

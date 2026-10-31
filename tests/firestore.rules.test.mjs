@@ -16,11 +16,13 @@ const HOUR = 3600 * 1000
 const ts = (msFromNow) => Timestamp.fromMillis(Date.now() + msFromNow)
 const DAY = '2026-12-01' // slot IDs only need the real format: {gameId}_{YYYY-MM-DD}_{HH}
 
-// Slot IDs and times. All "future" ones are > 6 hours away (editable).
+// Slot IDs and times. All "future" ones are > 1 hour away (editable).
 const T15 = { start: ts(48 * HOUR), end: ts(49 * HOUR) }
 const T16 = { start: ts(49 * HOUR), end: ts(50 * HOUR) }
 const T18 = { start: ts(51 * HOUR), end: ts(52 * HOUR) }
-const SOON = { start: ts(3 * HOUR), end: ts(4 * HOUR) } // inside the 6-hour lock
+const SOON = { start: ts(0.5 * HOUR), end: ts(1.5 * HOUR) } // 30 min away: inside the 1-hour lock
+const TWO_HOURS = { start: ts(2 * HOUR), end: ts(3 * HOUR) } // 2 h away: still editable
+const MAZE_2H = `the-maze_${DAY}_13`
 const MAZE_15 = `the-maze_${DAY}_15`
 const ESCAPE_15 = `escape-room_${DAY}_15`
 const ESCAPE_16 = `escape-room_${DAY}_16`
@@ -57,6 +59,10 @@ async function seed() {
     await setDoc(doc(db, 'bookings/b-held'), { ...base, slotId: HELD, gameId: 'mystery-lab', gameName: 'mystery-lab', ...held })
     await setDoc(doc(db, 'userSlots', lockId('alice', MAZE_SOON)), { uid: 'alice', bookingId: 'b-soon' })
     await setDoc(doc(db, 'userSlots', lockId('alice', HELD)), { uid: 'alice', bookingId: 'b-held' })
+    // A booking 2 hours away: would have been locked under the old 6-hour rule, editable now.
+    await setDoc(doc(db, 'slots', MAZE_2H), slotDoc(MAZE_2H, TWO_HOURS, { status: 'booked', bookedBy: 'alice', bookingId: 'b-2h' }))
+    await setDoc(doc(db, 'bookings/b-2h'), { ...base, slotId: MAZE_2H, gameId: 'the-maze', gameName: 'the-maze', ...TWO_HOURS })
+    await setDoc(doc(db, 'userSlots', lockId('alice', MAZE_2H)), { uid: 'alice', bookingId: 'b-2h' })
   })
 }
 
@@ -164,13 +170,17 @@ await check("customer cannot read another customer's booking", 'deny', () => get
 await check('admin reads any booking', 'allow', () => getDoc(doc(as('admin'), 'bookings/b-held')))
 
 // ---- cancel ----
-await check('customer cancels own booking > 6h before (frees slot and lock)', 'allow', () =>
+await check('customer cancels own booking > 1h before (frees slot and lock)', 'allow', () =>
   cancel(as('alice'), 'b-held', HELD, 'alice'))
+await check('1-hour lock: customer cancels a booking 2 hours away', 'allow', () =>
+  cancel(as('alice'), 'b-2h', MAZE_2H, 'alice'))
+await check('1-hour lock: customer changes players on a booking 2 hours away', 'allow', () =>
+  updateDoc(doc(as('alice'), 'bookings/b-2h'), { players: 6, updatedAt: serverTimestamp() }))
 await check('customer cannot cancel but keep the time lock', 'deny', () =>
   cancel(as('alice'), 'b-held', HELD, 'alice', 'customer', { deleteLock: false }))
 await check('customer cannot reopen slot while booking stays confirmed', 'deny', () =>
   updateDoc(doc(as('alice'), 'slots', HELD), OPEN))
-await check('customer cannot cancel inside the 6-hour lock', 'deny', () =>
+await check('1-hour lock: customer cannot cancel 30 minutes before', 'deny', () =>
   cancel(as('alice'), 'b-soon', MAZE_SOON, 'alice'))
 await check("customer cannot cancel another customer's booking", 'deny', () =>
   cancel(as('bob'), 'b-held', HELD, 'alice'))
@@ -180,9 +190,9 @@ await check('admin cancels any booking, even inside the lock (frees lock)', 'all
   cancel(as('admin'), 'b-soon', MAZE_SOON, 'alice', 'admin'))
 
 // ---- edit ----
-await check('customer changes players only (> 6h, lock kept)', 'allow', () =>
+await check('customer changes players only (> 1h, lock kept)', 'allow', () =>
   updateDoc(doc(as('alice'), 'bookings/b-held'), { players: 5, updatedAt: serverTimestamp() }))
-await check('customer cannot change players inside the lock', 'deny', () =>
+await check('1-hour lock: customer cannot change players 30 minutes before', 'deny', () =>
   updateDoc(doc(as('alice'), 'bookings/b-soon'), { players: 5, updatedAt: serverTimestamp() }))
 await check('customer moves booking to another hour (moves slot and lock)', 'allow', async () => {
   const db = as('alice')

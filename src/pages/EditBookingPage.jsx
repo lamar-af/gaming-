@@ -12,7 +12,7 @@ import {
 } from '../lib/scheduling.js'
 import { formatDate, formatTimeRange } from '../lib/format.js'
 import { friendlyAuthError } from '../lib/authErrors.js'
-import { EDIT_LOCK_HOURS } from '../config.js'
+import { EDIT_LOCK_LABEL } from '../config.js'
 
 export default function EditBookingPage() {
   const { id } = useParams()
@@ -56,7 +56,7 @@ export default function EditBookingPage() {
         <StateMessage type="error" title="This booking can't be changed.">
           {booking.status === 'cancelled'
             ? 'It has been cancelled.'
-            : `Changes close ${EDIT_LOCK_HOURS} hours before your session.`}
+            : `Changes close ${EDIT_LOCK_LABEL} before your session.`}
         </StateMessage>
         <div>{backLink}</div>
       </div>
@@ -97,7 +97,7 @@ export default function EditBookingPage() {
       <div className="page-head">
         <h1>Change your booking</h1>
         <p>
-          You can change the game, day, time, or players until {EDIT_LOCK_HOURS} hours before
+          You can change the game, day, time, or players until {EDIT_LOCK_LABEL} before
           your session.
         </p>
       </div>

@@ -10,7 +10,7 @@ rules_version = '2';
 //             themselves or release their own slot when its booking is cancelled
 //             or moved. Admins can change slots.
 // - bookings: customers read/create/edit/cancel ONLY their own, and edits/cancels
-//             only until 6 hours before the session. Admins read all and can cancel any.
+//             only until 1 hour before the session. Admins read all and can cancel any.
 // - userSlots: one lock per customer per hour ({uid}_{YYYY-MM-DD}_{HH}), so a customer
 //             can't hold two confirmed bookings at the same time, even for different games.
 // - Anything not allowed below is denied (including all deletes).
@@ -28,9 +28,10 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
     }
 
-    // The 6-hour rule: changes are allowed only until 6 hours before the session.
+    // The edit lock rule: changes are allowed only until 1 hour before the session.
+    // (Same number as EDIT_LOCK_HOURS in src/config.js.)
     function beforeLock(start) {
-      return request.time < start - duration.value(6, 'h');
+      return request.time < start - duration.value(1, 'h');
     }
 
     function onlyChanges(fields) {
@@ -125,7 +126,7 @@ service cloud.firestore {
         && bookingAfter(request.resource.data.bookingId).slotId == slotId
         && bookingAfter(request.resource.data.bookingId).status == 'confirmed';
 
-      // Customer releases their own slot: booked -> open, before the 6-hour lock,
+      // Customer releases their own slot: booked -> open, before the edit lock,
       // and only if its booking is cancelled or moved to another slot in the same write.
       allow update: if signedIn()
         && resource.data.status == 'booked'
@@ -159,7 +160,7 @@ service cloud.firestore {
         && slotHeldByBooking(request.resource.data, bookingId)
         && lockHeldByBooking(request.resource.data, bookingId);
 
-      // Customer edits their own booking (game, time, players) before the 6-hour lock.
+      // Customer edits their own booking (game, time, players) before the edit lock.
       allow update: if signedIn()
         && resource.data.userId == request.auth.uid
         && resource.data.status == 'confirmed'
@@ -171,7 +172,7 @@ service cloud.firestore {
         && slotHeldByBooking(request.resource.data, bookingId)
         && lockHeldByBooking(request.resource.data, bookingId);
 
-      // Customer cancels their own booking before the 6-hour lock, and frees the slot.
+      // Customer cancels their own booking before the edit lock, and frees the slot.
       allow update: if signedIn()
         && resource.data.userId == request.auth.uid
         && resource.data.status == 'confirmed'
@@ -184,7 +185,7 @@ service cloud.firestore {
         && (!existsAfter(lockPath(request.auth.uid, resource.data.slotId))
             || getAfter(lockPath(request.auth.uid, resource.data.slotId)).data.bookingId != bookingId);
 
-      // Admin cancels any booking at any time (no 6-hour rule).
+      // Admin cancels any booking at any time (no edit lock).
       allow update: if isAdmin()
         && resource.data.status == 'confirmed'
         && request.resource.data.status == 'cancelled'

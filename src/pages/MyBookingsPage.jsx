@@ -10,7 +10,7 @@ import {
 } from '../lib/scheduling.js'
 import { formatDate, formatTimeRange } from '../lib/format.js'
 import { friendlyAuthError } from '../lib/authErrors.js'
-import { DEFAULT_GAME_COLOR, EDIT_LOCK_HOURS, GAME_COLORS } from '../config.js'
+import { DEFAULT_GAME_COLOR, EDIT_LOCK_LABEL, GAME_COLORS } from '../config.js'
 
 function statusLabel(booking) {
   if (booking.status === 'cancelled') {
@@ -64,7 +64,7 @@ function BookingCard({ booking, busy, onCancel }) {
           </button>
           {!editable && (
             <p id={lockedId} className="lock">
-              Changes close {EDIT_LOCK_HOURS} hours before your session
+              Changes close {EDIT_LOCK_LABEL} before your session
             </p>
           )}
         </div>
@@ -165,7 +165,7 @@ export default function MyBookingsPage() {
     <div className="stack">
       <div className="page-head">
         <h1>My bookings</h1>
-        <p>You can change or cancel a booking until {EDIT_LOCK_HOURS} hours before it starts.</p>
+        <p>You can change or cancel a booking until {EDIT_LOCK_LABEL} before it starts.</p>
       </div>
       {message && <StateMessage type={message.type}>{message.text}</StateMessage>}
       {content}

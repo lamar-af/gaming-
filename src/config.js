@@ -15,7 +15,9 @@ export const MIN_PLAYERS = 1
 export const MAX_PLAYERS = 7
 
 // Customers can edit or cancel only until this many hours before the session.
-export const EDIT_LOCK_HOURS = 6
+export const EDIT_LOCK_HOURS = 1
+// For messages: "1 hour" / "6 hours". (firestore.rules has the same number: duration.value(1, 'h').)
+export const EDIT_LOCK_LABEL = `${EDIT_LOCK_HOURS} hour${EDIT_LOCK_HOURS === 1 ? '' : 's'}`
 
 // Display color per game (visual only, from the Bubble Quest design).
 export const GAME_COLORS = {
