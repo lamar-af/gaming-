@@ -10,7 +10,7 @@ import {
 } from '../lib/scheduling.js'
 import { formatDate, formatTimeRange } from '../lib/format.js'
 import { friendlyAuthError } from '../lib/authErrors.js'
-import { EDIT_LOCK_HOURS } from '../config.js'
+import { DEFAULT_GAME_COLOR, EDIT_LOCK_HOURS, GAME_COLORS } from '../config.js'
 
 function statusLabel(booking) {
   if (booking.status === 'cancelled') {
@@ -26,25 +26,31 @@ function BookingCard({ booking, busy, onCancel }) {
 
   return (
     <li className={`card booking booking-${booking.status}`}>
-      <div className="booking-head">
-        <strong>{booking.gameName}</strong>
-        <span className={`tag status-${booking.status}`}>{statusLabel(booking)}</span>
-      </div>
-      <div className="booking-meta">
-        <span>{formatDate(booking.start)}</span>
-        <span>{formatTimeRange(booking.start, booking.end)}</span>
-        <span>{booking.players} player(s)</span>
+      <span
+        className="game-dot"
+        style={{ background: GAME_COLORS[booking.gameId] ?? DEFAULT_GAME_COLOR }}
+        aria-hidden="true"
+      />
+      <div>
+        <h3>
+          {booking.gameName}{' '}
+          <span className={`tag status-${booking.status}`}>{statusLabel(booking)}</span>
+        </h3>
+        <p className="booking-when">
+          {formatDate(booking.start)} · {formatTimeRange(booking.start, booking.end)} ·{' '}
+          {booking.players} player{booking.players > 1 ? 's' : ''}
+        </p>
       </div>
 
       {isConfirmed && (
         <div className="booking-actions">
           {editable ? (
-            <Link to={`/my-bookings/${booking.id}/edit`} className="btn">
-              Edit
+            <Link to={`/my-bookings/${booking.id}/edit`} className="btn btn-ghost">
+              Change
             </Link>
           ) : (
-            <button type="button" className="btn" disabled aria-describedby={lockedId}>
-              Edit
+            <button type="button" className="btn btn-ghost" disabled aria-describedby={lockedId}>
+              Change
             </button>
           )}
           <button
@@ -57,9 +63,9 @@ function BookingCard({ booking, busy, onCancel }) {
             {busy ? 'Cancelling…' : 'Cancel'}
           </button>
           {!editable && (
-            <span id={lockedId} className="muted small">
+            <p id={lockedId} className="lock">
               Changes close {EDIT_LOCK_HOURS} hours before your session
-            </span>
+            </p>
           )}
         </div>
       )}
@@ -127,19 +133,28 @@ export default function MyBookingsPage() {
     )
   } else if (result.bookings.length === 0) {
     content = (
-      <StateMessage type="empty" title="You have no bookings yet.">
-        <Link to="/book">Book your first session →</Link>
+      <StateMessage type="empty" title="No games booked yet">
+        <p className="muted" style={{ margin: '6px 0 16px' }}>
+          Pick a game and grab a time for you and your friends.
+        </p>
+        <Link to="/book" className="btn btn-primary">
+          Book a game
+        </Link>
       </StateMessage>
     )
   } else {
     content = (
       <>
-        <section className="stack">
-          <h2>Upcoming</h2>
-          {renderList(upcoming, 'No upcoming bookings.')}
+        <section className="stack" aria-labelledby="upcoming-h">
+          <h2 id="upcoming-h" className="section-label">
+            Coming up
+          </h2>
+          {renderList(upcoming, 'Nothing coming up.')}
         </section>
-        <section className="stack">
-          <h2>Past</h2>
+        <section className="stack" aria-labelledby="past-h">
+          <h2 id="past-h" className="section-label">
+            Past
+          </h2>
           {renderList(past, 'No past bookings.')}
         </section>
       </>
@@ -148,12 +163,9 @@ export default function MyBookingsPage() {
 
   return (
     <div className="stack">
-      <div>
-        <p className="eyebrow">// my bookings</p>
+      <div className="page-head">
         <h1>My bookings</h1>
-        <p className="muted">
-          You can edit or cancel until {EDIT_LOCK_HOURS} hours before your session.
-        </p>
+        <p>You can change or cancel a booking until {EDIT_LOCK_HOURS} hours before it starts.</p>
       </div>
       {message && <StateMessage type={message.type}>{message.text}</StateMessage>}
       {content}

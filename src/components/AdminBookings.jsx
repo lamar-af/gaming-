@@ -3,11 +3,15 @@ import { useEffect, useState } from 'react'
 import StateMessage from './StateMessage.jsx'
 import {
   adminCancelBooking,
+  bookingStats,
   filterBookings,
   subscribeToAllBookings,
 } from '../lib/scheduling.js'
 import { formatDate, formatTimeRange } from '../lib/format.js'
 import { friendlyAuthError } from '../lib/authErrors.js'
+import { DEFAULT_GAME_COLOR, GAME_COLORS } from '../config.js'
+
+const NO_FILTERS = { date: '', gameId: '', status: '' }
 
 function statusLabel(booking) {
   if (booking.status === 'cancelled') {
@@ -18,7 +22,7 @@ function statusLabel(booking) {
 
 export default function AdminBookings({ games }) {
   const [result, setResult] = useState({ loaded: false, bookings: [], error: null })
-  const [filters, setFilters] = useState({ date: '', gameId: '', status: 'confirmed' })
+  const [filters, setFilters] = useState({ ...NO_FILTERS, status: 'confirmed' })
   const [busyId, setBusyId] = useState(null)
   const [message, setMessage] = useState(null) // { type, text }
 
@@ -35,7 +39,7 @@ export default function AdminBookings({ games }) {
 
   async function handleCancel(booking) {
     const ok = window.confirm(
-      `Cancel ${booking.userName}'s booking for ${booking.gameName} on ${formatDate(booking.start)} at ${formatTimeRange(booking.start, booking.end)}?`,
+      `Cancel ${booking.userName}'s ${booking.gameName} booking on ${formatDate(booking.start)} at ${formatTimeRange(booking.start, booking.end)}? The time will open up again.`,
     )
     if (!ok) return
 
@@ -43,7 +47,7 @@ export default function AdminBookings({ games }) {
     setMessage(null)
     try {
       await adminCancelBooking(booking.id)
-      setMessage({ type: 'success', text: 'Booking cancelled. The slot is open again.' })
+      setMessage({ type: 'success', text: 'Booking cancelled. The time is open again.' })
     } catch (err) {
       setMessage({ type: 'error', text: err.code ? friendlyAuthError(err) : err.message })
     } finally {
@@ -52,6 +56,7 @@ export default function AdminBookings({ games }) {
   }
 
   const visible = filterBookings(result.bookings, filters)
+  const stats = bookingStats(result.bookings)
 
   let content
   if (!result.loaded) {
@@ -64,8 +69,13 @@ export default function AdminBookings({ games }) {
     )
   } else if (visible.length === 0) {
     content = (
-      <StateMessage type="empty" title="No bookings match these filters.">
-        {result.bookings.length > 0 && 'Try clearing a filter.'}
+      <StateMessage type="empty" title="No bookings match">
+        <p className="muted" style={{ margin: '6px 0 16px' }}>
+          Try another day or clear the filters.
+        </p>
+        <button type="button" className="btn btn-ghost" onClick={() => setFilters(NO_FILTERS)}>
+          Clear filters
+        </button>
       </StateMessage>
     )
   } else {
@@ -73,17 +83,22 @@ export default function AdminBookings({ games }) {
       <ul className="list">
         {visible.map((b) => (
           <li key={b.id} className={`card booking booking-${b.status}`}>
-            <div className="booking-head">
-              <strong>{b.gameName}</strong>
-              <span className={`tag status-${b.status}`}>{statusLabel(b)}</span>
-            </div>
-            <div className="booking-meta">
-              <span>{formatDate(b.start)}</span>
-              <span>{formatTimeRange(b.start, b.end)}</span>
-              <span>{b.players} player(s)</span>
-            </div>
-            <div className="small">
-              {b.userName} · <a href={`mailto:${b.userEmail}`}>{b.userEmail}</a>
+            <span
+              className="game-dot"
+              style={{ background: GAME_COLORS[b.gameId] ?? DEFAULT_GAME_COLOR }}
+              aria-hidden="true"
+            />
+            <div>
+              <h3>
+                {b.gameName} <span className={`tag status-${b.status}`}>{statusLabel(b)}</span>
+              </h3>
+              <p className="booking-when">
+                {formatDate(b.start)} · {formatTimeRange(b.start, b.end)} · {b.players} player
+                {b.players > 1 ? 's' : ''}
+              </p>
+              <p className="booking-when">
+                {b.userName} · <a href={`mailto:${b.userEmail}`}>{b.userEmail}</a>
+              </p>
             </div>
             {b.status === 'confirmed' && (
               <div className="booking-actions">
@@ -104,12 +119,27 @@ export default function AdminBookings({ games }) {
   }
 
   return (
-    <section className="card stack">
-      <h2>Bookings</h2>
+    <section className="stack" aria-labelledby="bookings-h">
+      <h2 id="bookings-h" className="sr-only">
+        Bookings
+      </h2>
 
-      <div className="row">
+      {result.loaded && !result.error && (
+        <div className="stats">
+          <div className="stat">
+            <b>{stats.upcomingSessions}</b>
+            <span className="muted">upcoming sessions</span>
+          </div>
+          <div className="stat">
+            <b>{stats.playersExpected}</b>
+            <span className="muted">players expected</span>
+          </div>
+        </div>
+      )}
+
+      <div className="card filters">
         <label className="field">
-          <span>Date</span>
+          <span>Day</span>
           <input
             type="date"
             value={filters.date}
@@ -130,25 +160,19 @@ export default function AdminBookings({ games }) {
         <label className="field">
           <span>Status</span>
           <select value={filters.status} onChange={(e) => setFilter('status', e.target.value)}>
-            <option value="">All statuses</option>
+            <option value="">All</option>
             <option value="confirmed">Confirmed</option>
             <option value="cancelled">Cancelled</option>
           </select>
         </label>
       </div>
 
-      <div className="row small muted">
-        <span>
-          Showing {visible.length} of {result.bookings.length} booking(s)
-        </span>
-        <button
-          type="button"
-          className="link-button"
-          onClick={() => setFilters({ date: '', gameId: '', status: '' })}
-        >
+      <p className="small muted" aria-live="polite">
+        Showing {visible.length} of {result.bookings.length} booking(s) ·{' '}
+        <button type="button" className="link-button" onClick={() => setFilters(NO_FILTERS)}>
           Clear filters
         </button>
-      </div>
+      </p>
 
       {message && <StateMessage type={message.type}>{message.text}</StateMessage>}
       {content}

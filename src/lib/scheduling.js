@@ -310,6 +310,15 @@ export function subscribeToAllBookings(onChange, onError) {
   )
 }
 
+// Admin: numbers for the stats bar (upcoming confirmed sessions and players expected).
+export function bookingStats(bookings, now = new Date()) {
+  const upcoming = bookings.filter((b) => b.status === 'confirmed' && b.start.toDate() > now)
+  return {
+    upcomingSessions: upcoming.length,
+    playersExpected: upcoming.reduce((sum, b) => sum + b.players, 0),
+  }
+}
+
 // Admin: filter bookings by venue date ("YYYY-MM-DD"), game, and status.
 // An empty filter value means "all".
 export function filterBookings(bookings, { date, gameId, status }) {

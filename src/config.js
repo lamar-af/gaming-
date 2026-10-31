@@ -17,6 +17,14 @@ export const MAX_PLAYERS = 7
 // Customers can edit or cancel only until this many hours before the session.
 export const EDIT_LOCK_HOURS = 6
 
+// Display color per game (visual only, from the Bubble Quest design).
+export const GAME_COLORS = {
+  'the-maze': '#2E9E6A',
+  'escape-room': '#E8484D',
+  'mystery-lab': '#FFC857',
+}
+export const DEFAULT_GAME_COLOR = '#8E7DFF'
+
 // Starting games, used by the admin "seed games" button.
 // Once seeded, names live in Firestore and can be changed there.
 export const DEFAULT_GAMES = [

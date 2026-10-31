@@ -33,7 +33,7 @@ export default function EditBookingPage() {
 
   const { loaded, booking, games, error } = data
   const backLink = (
-    <Link to="/my-bookings" className="btn">
+    <Link to="/my-bookings" className="btn btn-ghost">
       Back to my bookings
     </Link>
   )
@@ -82,22 +82,23 @@ export default function EditBookingPage() {
           submitLabel="Save changes"
           submittingLabel="Saving…"
           onSubmit={handleSave}
+          secondaryAction={
+            <Link to="/my-bookings" className="btn btn-ghost btn-big">
+              Keep it as it is
+            </Link>
+          }
         />
-        <div>
-          <Link to="/my-bookings">Keep it as it is</Link>
-        </div>
       </div>
     )
   }
 
   return (
     <div className="stack">
-      <div>
-        <p className="eyebrow">// edit booking</p>
+      <div className="page-head">
         <h1>Change your booking</h1>
-        <p className="muted">
-          Change the game, date, time, or players until {EDIT_LOCK_HOURS} hours before your
-          session.
+        <p>
+          You can change the game, day, time, or players until {EDIT_LOCK_HOURS} hours before
+          your session.
         </p>
       </div>
       {content}

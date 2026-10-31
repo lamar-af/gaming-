@@ -163,15 +163,16 @@ export default function AdminPage() {
 
   return (
     <div className="stack">
-      <div>
-        <p className="eyebrow">// admin</p>
-        <h1>Admin</h1>
+      <div className="page-head">
+        <h1>All bookings</h1>
+        <p>See who’s coming and cancel a booking when you need to.</p>
       </div>
       {games === null ? (
         <StateMessage type="loading" title="Loading…" />
       ) : (
         <>
           <AdminBookings games={games} />
+          <h2 className="section-label">Venue tools</h2>
           {games.length > 0 && <SlotManager games={games} />}
         </>
       )}

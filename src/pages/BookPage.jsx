@@ -48,7 +48,7 @@ export default function BookPage() {
           <Link to="/my-bookings" className="btn btn-primary">
             View my bookings
           </Link>
-          <button type="button" className="btn" onClick={() => setBooked(null)}>
+          <button type="button" className="btn btn-ghost" onClick={() => setBooked(null)}>
             Book another
           </button>
         </div>
@@ -60,10 +60,9 @@ export default function BookPage() {
 
   return (
     <div className="stack">
-      <div>
-        <p className="eyebrow">// new booking</p>
-        <h1>Book a session</h1>
-        <p className="muted">60-minute sessions · up to 7 players · times in Riyadh time</p>
+      <div className="page-head">
+        <h1>Book a game</h1>
+        <p>Each session is 60 minutes for up to 7 players.</p>
       </div>
       {content}
     </div>

@@ -6,7 +6,7 @@ export default function AppLayout() {
   return (
     <>
       <Navbar />
-      <main className="page">
+      <main className="page" id="main">
         <Outlet />
       </main>
     </>

@@ -1,12 +1,13 @@
-import { NavLink, useNavigate } from 'react-router-dom'
+import { Link, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext.jsx'
+import Mascot from './Mascot.jsx'
 
 const LINKS = {
   customer: [
-    { to: '/book', label: 'Book' },
+    { to: '/book', label: 'Book a game' },
     { to: '/my-bookings', label: 'My bookings' },
   ],
-  admin: [{ to: '/admin', label: 'Admin' }],
+  admin: [{ to: '/admin', label: 'All bookings' }],
 }
 
 export default function Navbar() {
@@ -26,25 +27,32 @@ export default function Navbar() {
 
   return (
     <header className="navbar">
-      <button type="button" className="btn btn-ghost" onClick={goBack}>
-        ← Back
-      </button>
-
-      <nav aria-label="Main">
-        {(LINKS[role] ?? []).map((link) => (
-          <NavLink key={link.to} to={link.to} end className="nav-link">
-            {link.label}
-          </NavLink>
-        ))}
-      </nav>
-
-      <div className="navbar-user">
-        <span className="navbar-name">
-          {profile?.name} <span className="tag">{role}</span>
-        </span>
-        <button type="button" className="btn btn-ghost" onClick={handleLogOut}>
-          Log out
+      <div className="navbar-inner">
+        <button type="button" className="btn btn-ghost" onClick={goBack} aria-label="Go back">
+          ‹ Back
         </button>
+
+        <Link to="/" className="brand">
+          <Mascot size={34} />
+          Bubble Quest
+        </Link>
+
+        <nav className="nav-links" aria-label="Main">
+          {(LINKS[role] ?? []).map((link) => (
+            <NavLink key={link.to} to={link.to} end className="nav-link">
+              {link.label}
+            </NavLink>
+          ))}
+        </nav>
+
+        <div className="navbar-user">
+          <span className="small">
+            {profile?.name} {role === 'admin' && <span className="tag">admin</span>}
+          </span>
+          <button type="button" className="btn btn-ghost" onClick={handleLogOut}>
+            Log out
+          </button>
+        </div>
       </div>
     </header>
   )
