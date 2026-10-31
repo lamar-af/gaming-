@@ -1,0 +1,174 @@
+rules_version = '2';
+
+// Security rules for the game venue booking app.
+// The app hides buttons too, but THESE rules are what actually protect the data.
+//
+// Summary:
+// - users:    everyone is created as "customer"; nobody can change their own role.
+// - games:    read by signed-in users, written by admins only.
+// - slots:    read by signed-in users. Customers can only book an open slot for
+//             themselves or release their own slot when its booking is cancelled
+//             or moved. Admins can change slots.
+// - bookings: customers read/create/edit/cancel ONLY their own, and edits/cancels
+//             only until 6 hours before the session. Admins read all and can cancel any.
+// - Anything not allowed below is denied (including all deletes).
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- helpers ----------
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // The 6-hour rule: changes are allowed only until 6 hours before the session.
+    function beforeLock(start) {
+      return request.time < start - duration.value(6, 'h');
+    }
+
+    function onlyChanges(fields) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
+    }
+
+    function validPlayers(players) {
+      return players is int && players >= 1 && players <= 7;
+    }
+
+    function slotAfter(slotId) {
+      return getAfter(/databases/$(database)/documents/slots/$(slotId)).data;
+    }
+
+    function bookingAfter(bookingId) {
+      return getAfter(/databases/$(database)/documents/bookings/$(bookingId)).data;
+    }
+
+    // After this write, the booking's slot is booked by this user, points back to
+    // this booking, and has the same game and times. Stops fake times or
+    // bookings for slots someone else holds.
+    function slotHeldByBooking(booking, bookingId) {
+      let slot = slotAfter(booking.slotId);
+      return slot.status == 'booked'
+        && slot.bookedBy == request.auth.uid
+        && slot.bookingId == bookingId
+        && slot.gameId == booking.gameId
+        && slot.start == booking.start
+        && slot.end == booking.end;
+    }
+
+    // ---------- users ----------
+
+    match /users/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
+
+      // Only your own profile, only as a customer.
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['name', 'email', 'role', 'createdAt'])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.role == 'customer';
+
+      // Your own profile, but never the role.
+      // Admins are made by hand in the Firebase console.
+      allow update: if signedIn()
+        && request.auth.uid == uid
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']);
+    }
+
+    // ---------- games ----------
+
+    match /games/{gameId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    // ---------- slots ----------
+
+    match /slots/{slotId} {
+      allow read: if signedIn();
+
+      // Admin: generate, block, unblock, reopen.
+      allow write: if isAdmin();
+
+      // Customer books a slot: open -> booked, for themselves, before it starts,
+      // and only together with their own confirmed booking for this slot.
+      allow update: if signedIn()
+        && resource.data.status == 'open'
+        && resource.data.start > request.time
+        && request.resource.data.status == 'booked'
+        && request.resource.data.bookedBy == request.auth.uid
+        && request.resource.data.bookingId is string
+        && onlyChanges(['status', 'bookedBy', 'bookingId'])
+        && bookingAfter(request.resource.data.bookingId).userId == request.auth.uid
+        && bookingAfter(request.resource.data.bookingId).slotId == slotId
+        && bookingAfter(request.resource.data.bookingId).status == 'confirmed';
+
+      // Customer releases their own slot: booked -> open, before the 6-hour lock,
+      // and only if its booking is cancelled or moved to another slot in the same write.
+      allow update: if signedIn()
+        && resource.data.status == 'booked'
+        && resource.data.bookedBy == request.auth.uid
+        && beforeLock(resource.data.start)
+        && request.resource.data.status == 'open'
+        && request.resource.data.bookedBy == null
+        && request.resource.data.bookingId == null
+        && onlyChanges(['status', 'bookedBy', 'bookingId'])
+        && (bookingAfter(resource.data.bookingId).status == 'cancelled'
+            || bookingAfter(resource.data.bookingId).slotId != slotId);
+    }
+
+    // ---------- bookings ----------
+
+    match /bookings/{bookingId} {
+      // Customers see only their own bookings. Admins see all.
+      allow read: if signedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+
+      // Customer creates a booking for themselves, for a slot they book in the same transaction.
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly([
+             'slotId', 'gameId', 'gameName', 'userId', 'userName', 'userEmail',
+             'start', 'end', 'players', 'status', 'cancelledBy', 'createdAt', 'updatedAt'])
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.status == 'confirmed'
+        && request.resource.data.cancelledBy == null
+        && validPlayers(request.resource.data.players)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && slotHeldByBooking(request.resource.data, bookingId);
+
+      // Customer edits their own booking (game, time, players) before the 6-hour lock.
+      allow update: if signedIn()
+        && resource.data.userId == request.auth.uid
+        && resource.data.status == 'confirmed'
+        && beforeLock(resource.data.start)
+        && request.resource.data.status == 'confirmed'
+        && validPlayers(request.resource.data.players)
+        && request.resource.data.updatedAt == request.time
+        && onlyChanges(['slotId', 'gameId', 'gameName', 'start', 'end', 'players', 'updatedAt'])
+        && slotHeldByBooking(request.resource.data, bookingId);
+
+      // Customer cancels their own booking before the 6-hour lock, and frees the slot.
+      allow update: if signedIn()
+        && resource.data.userId == request.auth.uid
+        && resource.data.status == 'confirmed'
+        && beforeLock(resource.data.start)
+        && request.resource.data.status == 'cancelled'
+        && request.resource.data.cancelledBy == 'customer'
+        && request.resource.data.updatedAt == request.time
+        && onlyChanges(['status', 'cancelledBy', 'updatedAt'])
+        && slotAfter(resource.data.slotId).bookingId != bookingId;
+
+      // Admin cancels any booking at any time (no 6-hour rule).
+      allow update: if isAdmin()
+        && resource.data.status == 'confirmed'
+        && request.resource.data.status == 'cancelled'
+        && request.resource.data.cancelledBy == 'admin'
+        && onlyChanges(['status', 'cancelledBy', 'updatedAt']);
+    }
+  }
+}
